@@ -138,69 +138,6 @@ class NestedUNet(nn.Module):
         return output
 
 
-class stochasticUNet(nn.Module):
-    def __init__(self, input_channels,n_classes):
-        super().__init__()
-        self.input_channels = input_channels
-        self.n_classes = n_classes
-        self.multiplier = 2
-        self.layers = 4
-        self.downmodule = nn.ModuleList()
-        self.upmodule = nn.ModuleList()
-        nb_filter = [32, 64, 128, 256, 512]
-        self.inifilter = 32
-        self.pool = nn.MaxPool2d(2, 2)
-        self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-        
-        self.conv0_0 = DoubleBlock(input_channels, nb_filter[0])
-
-        for layer in range(self.layers):
-            layermodule = DoubleBlock(self.inifilter * np.power(self.multiplier,layer) , self.inifilter * np.power(self.multiplier,layer+1))
-            self.downmodule.append(layermodule)
-        for layer in range(self.layers):
-            layermodule = DoubleBlock(self.inifilter * np.power(self.multiplier,4-layer) + self.inifilter * np.power(self.multiplier,3-layer)
-                                     , self.inifilter * np.power(self.multiplier,3-layer))
-            self.upmodule.append(layermodule)
-
-            layermodulenc = DoubleBlock(self.inifilter * np.power(self.multiplier,4-layer), self.inifilter * np.power(self.multiplier,3-layer))
-            self.upmodule.append(layermodulenc)
-
-
-        self.final = nn.Conv2d(self.inifilter,n_classes , kernel_size=1)
-
-
-    def forward(self, input):
-        #normalized_betas = torch.randn(self._num_layers, 1, 3).cuda()
-        c1=1
-        c2=1
-        c3=1
-        c4=0
-        x0_0 = self.conv0_0(input)
-        x1_0 = self.downmodule[0](self.pool(x0_0))
-        x2_0 = self.downmodule[1](self.pool(x1_0))
-        x3_0 = self.downmodule[2](self.pool(x2_0))
-        x4_0 = self.downmodule[3](self.pool(x3_0))
-        
-        if c1 == 1 :
-            x3_1 = self.upmodule[0](torch.cat([x3_0, self.up(x4_0)], 1))
-        if c1 == 0 :
-            x3_1 = self.upmodule[1](self.up(x4_0))
-        if c2 == 1 :
-            x2_2 = self.upmodule[2](torch.cat([x2_0, self.up(x3_1)], 1))
-        if c2 == 0 : 
-            x2_2 = self.upmodule[3](self.up(x3_1))
-        if c3 == 1 :
-            x1_3 = self.upmodule[4](torch.cat([x1_0, self.up(x2_2)], 1))
-        if c3 == 0 :
-            x1_3 = self.upmodule[5](self.up(x2_2))
-        if c4 == 1 :
-            x0_4 = self.upmodule[6](torch.cat([x0_0, self.up(x1_3)], 1))
-        if c4 == 0 :
-            x0_4 = self.upmodule[7](self.up(x1_3))
-        
-        output = self.final(x0_4)
-        return output
-
 class NasUNet(nn.Module):
     def __init__(self, input_channels,n_classes):
         super().__init__()
@@ -218,10 +155,7 @@ class NasUNet(nn.Module):
         #self.routes = [nn.Parameter(torch.randn(2*(self.layers-1-i)-1).cuda(), requires_grad=True) for i in range(self.layers-1)] #7 5 3 1
         self._arch_param_names = ["routes0", "routes1", "routes2", "routes3"]
         self._initialize_alphas ()
-        #self.routes0 = nn.Parameter(Variable(1e-3*torch.ones(7).cuda(), requires_grad=True))
-        #self.routes1 = nn.Parameter(Variable(1e-3*torch.ones(5).cuda(), requires_grad=True))
-        #self.routes2 = nn.Parameter(Variable(1e-3*torch.ones(3).cuda(), requires_grad=True))
-        #self.routes3 = nn.Parameter(Variable(1e-3*torch.ones(1).cuda(), requires_grad=True))
+
         for layer in range(self.layers):
             if layer == 0:
                 self.layermodule = nn.ModuleList()
@@ -261,10 +195,6 @@ class NasUNet(nn.Module):
         layer2 = []
         layer3 = []
         layer4 = []
-        weight0 = torch.sigmoid(self.routes0)
-        weight1 = torch.sigmoid(self.routes1)
-        weight2 = torch.sigmoid(self.routes2)
-        weight3 = torch.sigmoid(self.routes3)
         
         for layer , mlayer in enumerate(self.module): 
             
@@ -304,13 +234,477 @@ class NasUNet(nn.Module):
                         layer4.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routes3[stage])*layer3[stage],self.up(layer3[stage+1])], 1)))
         #x = self.final(x)
         return self.final(layer4[0]) 
+
+    
+    
+class BaseDownSample(nn.Module):
+    def __init__(self, input_channels,n_classes):
+        super().__init__()
+        self.input_channels = input_channels
+        self.n_classes = n_classes
+        self.multiplier = 2
+        self.layers = 5
+        self.module = nn.ModuleList()
+        nb_filter = [32, 64, 128, 256, 512]
+        self.inifilter = 32
+        self.pool = nn.MaxPool2d(2, 2)
+        self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        
+        self.final = nn.Conv2d(self.inifilter,n_classes , kernel_size=1)
+        #self.routes = [nn.Parameter(torch.randn(2*(self.layers-1-i)-1).cuda(), requires_grad=True) for i in range(self.layers-1)] #7 5 3 1
+        self._arch_param_names = ["routes0", "routes1", "routes2", "routes3"]
+        self._initialize_alphas ()
+
+        for layer in range(self.layers):
+            if layer == 0:
+                self.layermodule = nn.ModuleList()
+                for stage in range(self.layers-layer):
+                    if stage == 0: 
+                        self.layermodule.append(DoubleBlock(input_channels, nb_filter[0]))                           
+                    else :
+                        self.layermodule.append(DoubleBlock(self.inifilter * np.power(self.multiplier,stage-1) , self.inifilter * np.power(self.multiplier,stage)))
+                self.module.append(self.layermodule)
+            else :
+                self.layermodule = nn.ModuleList()
+                for stage in range(self.layers-layer):
+                    if stage == 0: #第一層 (32+64,32),(32*2+64,32)
+                        self.layermodule.append(DoubleBlock(self.inifilter * np.power(self.multiplier,stage) * layer +self.inifilter * np.power(self.multiplier,stage+1) , self.inifilter * np.power(self.multiplier,stage)))
+                    if stage > 0 : #(64*2+128,64),(64*3+128,64),(64*4+128,64)
+                        self.layermodule.append(DoubleBlock(self.inifilter * np.power(self.multiplier,stage) * (layer+1) +self.inifilter * np.power(self.multiplier,stage+1) , self.inifilter * np.power(self.multiplier,stage)))
+                for stage in range(self.layers-layer-1): #ex layer1 有四個stage,只有三個downsampling
+                    self.layermodule.append(DoubleBlock(self.inifilter * np.power(self.multiplier,stage),self.inifilter * np.power(self.multiplier,stage+1))) # for downsampling + maxpooling
+                self.module.append(self.layermodule)
+                
+    def _initialize_alphas(self):
+        routes0 = nn.Parameter(1e-3*torch.ones(7).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[0], nn.Parameter(routes0))
+  
+        routes1 = nn.Parameter(1e-3*torch.ones(5).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[1], nn.Parameter(routes1))
+        
+        routes2 = nn.Parameter(1e-3*torch.ones(3).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[2], nn.Parameter(routes2))
+        
+        routes3 = nn.Parameter(1e-3*torch.ones(1).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[3], nn.Parameter(routes3))
+        
+    def arch_parameters(self):
+        return [param for name, param in self.named_parameters() if name in self._arch_param_names]
+
+    def weight_parameters(self):
+        return [param for name, param in self.named_parameters() if name not in self._arch_param_names]
+            
+    def forward(self, input):  
+        layer0 = []
+        layer1 = []
+        layer2 = []
+        layer3 = []
+        layer4 = []
+        
+        for layer , mlayer in enumerate(self.module): 
+            
+            if layer == 0 :
+                for stage ,layers in enumerate(mlayer) :
+                    if stage == 0:
+                        layer0.append(self.module[layer][stage](input))        
+                    else :
+                        layer0.append(self.module[layer][stage](self.pool(layer0[stage-1])))
+                        
+            elif layer == 1:
+                for stage ,layers in enumerate(mlayer) :
+                    if stage == 0:
+                        layer1.append(self.module[layer][stage](torch.cat([layer0[stage],self.up(layer0[stage+1])], 1)))
+                    if stage > 0 and stage < (len(mlayer)+1)//2-1: 
+                        layer1.append(self.module[layer][stage](torch.cat([layer0[stage],self.up(layer0[stage+1]),self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer1[stage-1]))], 1)))
+                    if  stage == (len(mlayer)+1)//2-1: #最後一層不乘機率
+                        layer1.append(self.module[layer][stage](torch.cat([layer0[stage],self.up(layer0[stage+1]),self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer1[stage-1]))], 1)))
+                        
+            elif layer == 2:
+                for stage ,layers in enumerate(mlayer) :
+                    if stage == 0:
+                        layer2.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],self.up(layer1[stage+1])], 1)))
+                    if stage > 0  and stage < (len(mlayer)+1)//2-1: 
+                        layer2.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],self.up(layer1[stage+1]),self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer2[stage-1]))], 1)))
+                    if  stage == (len(mlayer)+1)//2-1: #最後一層不乘機率
+                        layer2.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],self.up(layer1[stage+1]),self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer2[stage-1]))], 1)))
+                        
+            elif layer == 3:
+                for stage ,layers in enumerate(mlayer) :
+                    if stage == 0:
+                        layer3.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],layer2[stage],self.up(layer2[stage+1])], 1)))
+                    if stage > 0  and stage < (len(mlayer)+1)//2-1: 
+                        layer3.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],layer2[stage],self.up(layer2[stage+1]),self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer3[stage-1]))], 1)))
+                    if  stage == (len(mlayer)+1)//2-1: #最後一層不乘機率
+                        layer3.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],layer2[stage],self.up(layer2[stage+1]),self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer3[stage-1]))], 1)))
+                        
+            elif layer == 4:
+                for stage ,layers in enumerate(mlayer) :
+                    layer4.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],layer2[stage],layer3[stage],self.up(layer3[stage+1])], 1)))
+                        
+        return self.final(layer4[0]) 
+    
+class SearchDownSample(nn.Module):
+    def __init__(self, input_channels,n_classes):
+        super().__init__()
+        self.input_channels = input_channels
+        self.n_classes = n_classes
+        self.multiplier = 2
+        self.layers = 5
+        self.module = nn.ModuleList()
+        nb_filter = [32, 64, 128, 256, 512]
+        self.inifilter = 32
+        self.pool = nn.MaxPool2d(2, 2)
+        self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        
+        self.final = nn.Conv2d(self.inifilter,n_classes , kernel_size=1)
+        #self.routes = [nn.Parameter(torch.randn(2*(self.layers-1-i)-1).cuda(), requires_grad=True) for i in range(self.layers-1)] #7 5 3 1
+        self._arch_param_names = ["routes0","routes1","routes2"]
+        self._initialize_alphas ()
+
+        for layer in range(self.layers):
+            if layer == 0:
+                self.layermodule = nn.ModuleList()
+                for stage in range(self.layers-layer):
+                    if stage == 0: 
+                        self.layermodule.append(DoubleBlock(input_channels, nb_filter[0]))                           
+                    else :
+                        self.layermodule.append(DoubleBlock(self.inifilter * np.power(self.multiplier,stage-1) , self.inifilter * np.power(self.multiplier,stage)))
+                self.module.append(self.layermodule)
+            else :
+                self.layermodule = nn.ModuleList()
+                for stage in range(self.layers-layer):
+                    if stage == 0: #第一層 (32+64,32),(32*2+64,32)
+                        self.layermodule.append(DoubleBlock(self.inifilter * np.power(self.multiplier,stage) * layer +self.inifilter * np.power(self.multiplier,stage+1) , self.inifilter * np.power(self.multiplier,stage)))
+                    if stage > 0 : #(64*2+128,64),(64*3+128,64),(64*4+128,64)
+                        self.layermodule.append(DoubleBlock(self.inifilter * np.power(self.multiplier,stage) * (layer+1) +self.inifilter * np.power(self.multiplier,stage+1) , self.inifilter * np.power(self.multiplier,stage)))
+                for stage in range(self.layers-layer-1): #ex layer1 有四個stage,只有三個downsampling
+                    self.layermodule.append(DoubleBlock(self.inifilter * np.power(self.multiplier,stage),self.inifilter * np.power(self.multiplier,stage+1))) # for downsampling + maxpooling
+                self.module.append(self.layermodule)
+                
+    def _initialize_alphas(self):
+        routes0 = nn.Parameter(1e-3*torch.ones(3).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[0], nn.Parameter(routes0))
+  
+        routes1 = nn.Parameter(1e-3*torch.ones(2).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[1], nn.Parameter(routes1))
+        
+        routes2 = nn.Parameter(1e-3*torch.ones(1).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[2], nn.Parameter(routes2))
+        
+        #routes3 = nn.Parameter(1e-3*torch.ones(1).cuda(), requires_grad=True)
+        #self.register_parameter(self._arch_param_names[3], nn.Parameter(routes3))
+        
+    def arch_parameters(self):
+        return [param for name, param in self.named_parameters() if name in self._arch_param_names]
+
+    def weight_parameters(self):
+        return [param for name, param in self.named_parameters() if name not in self._arch_param_names]
+            
+    def forward(self, input):  
+        layer0 = []
+        layer1 = []
+        layer2 = []
+        layer3 = []
+        layer4 = []
+        
+        for layer , mlayer in enumerate(self.module): 
+            
+            if layer == 0 :
+                for stage ,layers in enumerate(mlayer) :
+                    if stage == 0:
+                        layer0.append(self.module[layer][stage](input))        
+                    else :
+                        layer0.append(self.module[layer][stage](self.pool(layer0[stage-1])))
+                        
+            elif layer == 1:
+                for stage ,layers in enumerate(mlayer) :
+                    if stage == 0:
+                        layer1.append(self.module[layer][stage](torch.cat([layer0[stage],self.up(layer0[stage+1])], 1)))
+                    if stage > 0 and stage < (len(mlayer)+1)//2-1: 
+                        layer1.append(self.module[layer][stage](torch.cat([layer0[stage],self.up(layer0[stage+1]),torch.sigmoid(self.routes0[stage-1])*self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer1[stage-1]))], 1)))
+                    if  stage == (len(mlayer)+1)//2-1: #最後一層不乘機率
+                        layer1.append(self.module[layer][stage](torch.cat([layer0[stage],self.up(layer0[stage+1]),torch.sigmoid(self.routes0[stage-1])*self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer1[stage-1]))], 1)))
+                        
+            elif layer == 2:
+                for stage ,layers in enumerate(mlayer) :
+                    if stage == 0:
+                        layer2.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],self.up(layer1[stage+1])], 1)))
+                    if stage > 0  and stage < (len(mlayer)+1)//2-1: 
+                        layer2.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],self.up(layer1[stage+1]),torch.sigmoid(self.routes1[stage-1])*self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer2[stage-1]))], 1)))
+                    if  stage == (len(mlayer)+1)//2-1: #最後一層不乘機率
+                        layer2.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],self.up(layer1[stage+1]),torch.sigmoid(self.routes1[stage-1])*self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer2[stage-1]))], 1)))
+                        
+            elif layer == 3:
+                for stage ,layers in enumerate(mlayer) :
+                    if stage == 0:
+                        layer3.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],layer2[stage],self.up(layer2[stage+1])], 1)))
+                    if stage > 0  and stage < (len(mlayer)+1)//2-1: 
+                        layer3.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],layer2[stage],self.up(layer2[stage+1]),torch.sigmoid(self.routes2[stage-1])*self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer3[stage-1]))], 1)))
+                    if  stage == (len(mlayer)+1)//2-1: #最後一層不乘機率
+                        layer3.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],layer2[stage],self.up(layer2[stage+1]),torch.sigmoid(self.routes2[stage-1])*self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer3[stage-1]))], 1)))
+                        
+            elif layer == 4:
+                for stage ,layers in enumerate(mlayer) :
+                    layer4.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],layer2[stage],layer3[stage],self.up(layer3[stage+1])], 1)))
+                        
+        return self.final(layer4[0]) 
+
+class DownSample_Decode_V1(nn.Module):
+    def __init__(self, input_channels,n_classes,dsweight):
+        super().__init__()
+        self.input_channels = input_channels
+        self.n_classes = n_classes
+        self.multiplier = 2
+        self.layers = 5
+        self.module = nn.ModuleList()
+        nb_filter = [32, 64, 128, 256, 512]
+        self.inifilter = 32
+        self.pool = nn.MaxPool2d(2, 2)
+        self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        
+        self.final = nn.Conv2d(self.inifilter,n_classes , kernel_size=1)
+        #self.routes = [nn.Parameter(torch.randn(2*(self.layers-1-i)-1).cuda(), requires_grad=True) for i in range(self.layers-1)] #7 5 3 1
+        self._arch_param_names = ["routes0","routes1","routes2"]
+        self._initialize_alphas ()
+        
+        self.dsweight = dsweight #downsample weighted 
+        self.dsweight_decode = self.roundsigmoid()
+        for layer in range(self.layers):
+            if layer == 0:
+                self.layermodule = nn.ModuleList()
+                for stage in range(self.layers-layer):
+                    if stage == 0: 
+                        self.layermodule.append(DoubleBlock(input_channels, nb_filter[0]))                           
+                    else :
+                        self.layermodule.append(DoubleBlock(self.inifilter * np.power(self.multiplier,stage-1) , self.inifilter * np.power(self.multiplier,stage)))
+                self.module.append(self.layermodule)
+            else :
+                self.layermodule = nn.ModuleList()
+                for stage in range(self.layers-layer):
+                    if stage == 0: #第一層 (32+64,32),(32*2+64,32)
+                        self.layermodule.append(DoubleBlock(self.inifilter * np.power(self.multiplier,stage) * layer +self.inifilter * np.power(self.multiplier,stage+1) , self.inifilter * np.power(self.multiplier,stage)))
+                    if stage > 0 : #(64*2+128,64),(64*3+128,64),(64*4+128,64)
+                        self.layermodule.append(DoubleBlock(self.inifilter * np.power(self.multiplier,stage) * (layer) + int(self.dsweight_decode[layer-1][stage-1].item()) * self.inifilter * np.power(self.multiplier,stage) + self.inifilter * np.power(self.multiplier,stage+1) , self.inifilter * np.power(self.multiplier,stage)))
+                for stage in range(self.layers-layer-1): #ex layer1 有四個stage,只有三個downsampling
+                    self.layermodule.append(DoubleBlock(self.inifilter * np.power(self.multiplier,stage),self.inifilter * np.power(self.multiplier,stage+1))) # for downsampling + maxpooling
+                self.module.append(self.layermodule)
+                
+    def _initialize_alphas(self):
+        routes0 = nn.Parameter(1e-3*torch.ones(3).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[0], nn.Parameter(routes0))
+  
+        routes1 = nn.Parameter(1e-3*torch.ones(2).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[1], nn.Parameter(routes1))
+        
+        routes2 = nn.Parameter(1e-3*torch.ones(1).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[2], nn.Parameter(routes2))
+        
+        #routes3 = nn.Parameter(1e-3*torch.ones(1).cuda(), requires_grad=True)
+        #self.register_parameter(self._arch_param_names[3], nn.Parameter(routes3))
+        
+    def arch_parameters(self):
+        return [param for name, param in self.named_parameters() if name in self._arch_param_names]
+
+    def weight_parameters(self):
+        return [param for name, param in self.named_parameters() if name not in self._arch_param_names]
+    def roundsigmoid(self):
+        for i in range(len(self.dsweight)):
+            for j in range(len(self.dsweight[i])):
+                tmp = torch.sigmoid(self.dsweight[i][j])
+                if tmp >= 0.5:
+                    self.dsweight[i][j] = 1
+                else :
+                    self.dsweight[i][j] = 0
+        return self.dsweight
+            
+    def forward(self, input):  
+        layer0 = []
+        layer1 = []
+        layer2 = []
+        layer3 = []
+        layer4 = []
+        
+        for layer , mlayer in enumerate(self.module): 
+            
+            if layer == 0 :
+                for stage ,layers in enumerate(mlayer) :
+                    if stage == 0:
+                        layer0.append(self.module[layer][stage](input))        
+                    else :
+                        layer0.append(self.module[layer][stage](self.pool(layer0[stage-1])))
+                        
+            elif layer == 1:
+                for stage ,layers in enumerate(mlayer) :
+                    if stage == 0:
+                        layer1.append(self.module[layer][stage](torch.cat([layer0[stage],self.up(layer0[stage+1])], 1)))
+                    if stage > 0 and stage < (len(mlayer)+1)//2-1: 
+                        if self.dsweight_decode[layer-1][stage-1].item() > 0: 
+                            layer1.append(self.module[layer][stage](torch.cat([layer0[stage],self.up(layer0[stage+1]), self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer1[stage-1]))], 1)))
+                        else :
+                            layer1.append(self.module[layer][stage](torch.cat([layer0[stage],self.up(layer0[stage+1]),], 1)))
+                    if  stage == (len(mlayer)+1)//2-1: #最後一層不乘機率
+                        if self.dsweight_decode[layer-1][stage-1].item() > 0: 
+                            layer1.append(self.module[layer][stage](torch.cat([layer0[stage],self.up(layer0[stage+1]), self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer1[stage-1]))], 1)))
+                        else :
+                            layer1.append(self.module[layer][stage](torch.cat([layer0[stage],self.up(layer0[stage+1]),], 1)))
+                        
+            elif layer == 2:
+                for stage ,layers in enumerate(mlayer) :
+                    if stage == 0:
+                        layer2.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],self.up(layer1[stage+1])], 1)))
+                    if stage > 0  and stage < (len(mlayer)+1)//2-1: 
+                        if self.dsweight_decode[layer-1][stage-1].item() > 0: 
+                            layer2.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],self.up(layer1[stage+1]),self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer2[stage-1]))], 1)))
+                        else :
+                            layer2.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],self.up(layer1[stage+1])], 1)))
+                    if  stage == (len(mlayer)+1)//2-1: #最後一層不乘機率
+                        if self.dsweight_decode[layer-1][stage-1].item() > 0: 
+                            layer2.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],self.up(layer1[stage+1]),self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer2[stage-1]))], 1)))
+                        else :
+                            layer2.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],self.up(layer1[stage+1])], 1)))
+                        
+            elif layer == 3:
+                for stage ,layers in enumerate(mlayer) :
+                    if stage == 0:
+                        layer3.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],layer2[stage],self.up(layer2[stage+1])], 1)))
+                    if stage > 0  and stage < (len(mlayer)+1)//2-1: 
+                        if self.dsweight_decode[layer-1][stage-1].item() > 0: 
+                            layer3.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],layer2[stage],self.up(layer2[stage+1]),self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer3[stage-1]))], 1)))
+                        else : 
+                            layer3.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],layer2[stage],self.up(layer2[stage+1])], 1)))
+                    if  stage == (len(mlayer)+1)//2-1: #最後一層不乘機率
+                        if self.dsweight_decode[layer-1][stage-1].item() > 0: 
+                            layer3.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],layer2[stage],self.up(layer2[stage+1]),self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer3[stage-1]))], 1)))
+                        else : 
+                            layer3.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],layer2[stage],self.up(layer2[stage+1])], 1)))
+            elif layer == 4:
+                for stage ,layers in enumerate(mlayer) :
+                    layer4.append(self.module[layer][stage](torch.cat([layer0[stage],layer1[stage],layer2[stage],layer3[stage],self.up(layer3[stage+1])], 1)))
+                        
+        return self.final(layer4[0]) 
+
+class Base(nn.Module):
+    def __init__(self, input_channels,n_classes):
+        super().__init__()
+        self.input_channels = input_channels
+        self.n_classes = n_classes
+        
+
+        nb_filter = [32, 64, 128, 256, 512]
+
+        self.pool = nn.MaxPool2d(2, 2)
+        self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+
+        self.conv0_0 = DoubleBlock(input_channels, nb_filter[0])
+        self.conv1_0 = DoubleBlock(nb_filter[0], nb_filter[1])
+        self.conv2_0 = DoubleBlock(nb_filter[1], nb_filter[2])
+        self.conv3_0 = DoubleBlock(nb_filter[2], nb_filter[3])
+        self.conv4_0 = DoubleBlock(nb_filter[3], nb_filter[4])
+        
+        self.conv0_1 = DoubleBlock(nb_filter[0]+nb_filter[1], nb_filter[0])
+        self.conv1_1 = DoubleBlock(nb_filter[1]+nb_filter[2], nb_filter[1])
+        self.conv2_1 = DoubleBlock(nb_filter[2]+nb_filter[3],nb_filter[2])
+        self.conv3_1 = DoubleBlock(nb_filter[3]+nb_filter[4], nb_filter[3])
+
+        self.conv0_2 = DoubleBlock(nb_filter[0]+nb_filter[1], nb_filter[0])
+        self.conv1_2 = DoubleBlock(nb_filter[1]+nb_filter[2], nb_filter[1])
+        self.conv2_2 = DoubleBlock(nb_filter[2]+nb_filter[3], nb_filter[2])
+
+        self.conv0_3 = DoubleBlock(nb_filter[0]+nb_filter[1], nb_filter[0])
+        self.conv1_3 = DoubleBlock(nb_filter[1]+nb_filter[2], nb_filter[1])
+
+        self.conv0_4 = DoubleBlock(nb_filter[0]+nb_filter[1], nb_filter[0])
+        
+
+        self.final = nn.Conv2d(nb_filter[0], n_classes, kernel_size=1)
+
+
+    def forward(self, input):
+        x0_0 = self.conv0_0(input)
+        x1_0 = self.conv1_0(self.pool(x0_0))
+        x0_1 = self.conv0_1(torch.cat([x0_0, self.up(x1_0)], 1))
+
+        x2_0 = self.conv2_0(self.pool(x1_0))
+        x1_1 = self.conv1_1(torch.cat([x1_0, self.up(x2_0)], 1))
+        x0_2 = self.conv0_2(torch.cat([x0_1, self.up(x1_1)], 1))
+
+        x3_0 = self.conv3_0(self.pool(x2_0))
+        x2_1 = self.conv2_1(torch.cat([x2_0, self.up(x3_0)], 1))
+        x1_2 = self.conv1_2(torch.cat([x1_1, self.up(x2_1)], 1))
+        x0_3 = self.conv0_3(torch.cat([x0_2, self.up(x1_2)], 1))
+
+        x4_0 = self.conv4_0(self.pool(x3_0))
+        x3_1 = self.conv3_1(torch.cat([x3_0, self.up(x4_0)], 1))
+        x2_2 = self.conv2_2(torch.cat([x2_1, self.up(x3_1)], 1))
+        x1_3 = self.conv1_3(torch.cat([x1_2, self.up(x2_2)], 1))
+        x0_4 = self.conv0_4(torch.cat([x0_3, self.up(x1_3)], 1))
+        
+        output = self.final(x0_4)
+        return output
+    
+class NasUnetV1(nn.Module):
+    def __init__(self, input_channels,n_classes):
+        super().__init__()
+        self.input_channels = input_channels
+        self.n_classes = n_classes
+        
+
+        nb_filter = [32, 64, 128, 256, 512]
+
+        self.pool = nn.MaxPool2d(2, 2)
+        self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+
+        self.conv0_0 = DoubleBlock(input_channels, nb_filter[0])
+        self.conv1_0 = DoubleBlock(nb_filter[0], nb_filter[1])
+        self.conv2_0 = DoubleBlock(nb_filter[1], nb_filter[2])
+        self.conv3_0 = DoubleBlock(nb_filter[2], nb_filter[3])
+        self.conv4_0 = DoubleBlock(nb_filter[3], nb_filter[4])
+        
+        #self.conv0_1 = DoubleBlock(nb_filter[0], nb_filter[0])
+        #self.conv1_1 = DoubleBlock(nb_filter[1]+nb_filter[2], nb_filter[1])
+        self.conv2_1 = DoubleBlock(nb_filter[2]+nb_filter[3],nb_filter[2])
+        self.conv3_1 = DoubleBlock(nb_filter[3]+nb_filter[4], nb_filter[3])
+
+        #self.conv0_2 = DoubleBlock(nb_filter[0]+nb_filter[1], nb_filter[0])
+        self.conv1_2 = DoubleBlock(nb_filter[2], nb_filter[1])
+        self.conv2_2 = DoubleBlock(nb_filter[2]+nb_filter[3], nb_filter[2])
+
+        #self.conv0_3 = DoubleBlock(nb_filter[0]+nb_filter[1], nb_filter[0])
+        self.conv1_3 = DoubleBlock(nb_filter[1]+nb_filter[2], nb_filter[1])
+
+        self.conv0_4 = DoubleBlock(nb_filter[0]+nb_filter[1], nb_filter[0])
+        
+
+        self.final = nn.Conv2d(nb_filter[0], n_classes, kernel_size=1)
+
+
+    def forward(self, input):
+        x0_0 = self.conv0_0(input)
+        x1_0 = self.conv1_0(self.pool(x0_0))
+        #x0_1 = self.conv0_1(x0_0)
+
+        x2_0 = self.conv2_0(self.pool(x1_0))
+
+        x3_0 = self.conv3_0(self.pool(x2_0))
+        x2_1 = self.conv2_1(torch.cat([x2_0, self.up(x3_0)], 1))
+        x1_2 = self.conv1_2(self.up(x2_1))
+
+        x4_0 = self.conv4_0(self.pool(x3_0))
+        x3_1 = self.conv3_1(torch.cat([x3_0, self.up(x4_0)], 1))
+        x2_2 = self.conv2_2(torch.cat([x2_1, self.up(x3_1)], 1))
+        x1_3 = self.conv1_3(torch.cat([x1_2, self.up(x2_2)], 1))
+        x0_4 = self.conv0_4(torch.cat([x0_0, self.up(x1_3)], 1))
+        
+        output = self.final(x0_4)
+        return output
     
 if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    '''
     x = torch.rand(size=(1,1,256,256))
     y = torch.rand(size=(1,1,256,256))
-    model = NasUNet(1,1).to(device)
-    print (model.arch_parameters ())
+    model = SearchDownSample(1,1).to(device)
+    #print (model.arch_parameters ())
     optimizer = optim.Adam(model.parameters(), weight_decay=1e-5)
     criterion = nn.BCEWithLogitsLoss()
     epoch_loss = 0
@@ -320,7 +714,7 @@ if __name__ == '__main__':
         # zero the parameter gradients
         optimizer.zero_grad()
         # forward
-        outputs ,parm0, parm1 , parm2, parm3= model(inputs)
+        outputs = model(inputs)
         loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
@@ -331,3 +725,20 @@ if __name__ == '__main__':
         #print(parm0,parm1,parm2,parm3)
     #for param in model.parameters():
         #print(type(param.data), param.size())
+    '''
+    model = SearchDownSample(3,3).to(device)
+
+    model.load_state_dict(torch.load("./models/road_SearchDownSample_256_512/road_SearchDownSample_256_512_weights_epoch_25.pth"
+                                         ,map_location='cpu'))
+    #print(model)
+    #model.eval()
+    #print (model.arch_parameters ())
+    para = model.arch_parameters ()
+    #print(torch.sigmoid(para[0]))
+    #print(torch.sigmoid(para[1]))
+    #print(torch.sigmoid(para[2]))
+    
+    #print(torch.sigmoid(para[3]))
+    model_d = DownSample_Decode_V1(3,3,para).to(device)
+    print(model_d)
+    
