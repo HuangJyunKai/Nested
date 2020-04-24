@@ -11,6 +11,7 @@ from torchvision.transforms import transforms
 from torch.optim import lr_scheduler
 from nested_unet import  NestedWNet , UNet,NestedWNet_v2,NestedWNet_v3,NestedUNet,NestedUNet_RO
 from nasunet import NasUNet,Base,NasUnetV1,BaseDownSample,SearchDownSample
+from unetsearch import ALLSearch
 from dataset_road import RoadDataset
 from IOUEval import iouEval
 import numpy as np
@@ -80,6 +81,7 @@ y_val = transforms.Compose([
 ])
 nclass=3 # 0 background
 IGNORE_LABEL = 0
+
 def validation(epoch,model, criterion, optimizer, val_loader):
     iouEvalVal = iouEval(nclass)
     model.eval()
@@ -147,25 +149,28 @@ def train_model(model, criterion, optimizer, train_loader, scheduler, epoch, num
     print("per_class_acc :",per_class_acc)
     print("per_class_iou :",per_class_iou)
     print("mIOU :",mIOU)
-    dirName = "./models/road_BaseDownSample60ep_256_512/"
+    dirName = "./models/ALLSearch/"
     if not os.path.exists(dirName):
        os.mkdir(dirName)
        print("Directory " , dirName ,  " Created ")  
-    if epoch%5==4:
-        torch.save(model.state_dict(), dirName+'road_BaseDownSample60ep_256_512_weights_epoch_%d.pth' % (epoch+1))
+    if epoch%10==9:
+        torch.save(model.state_dict(), dirName+'ALLSearch_epoch_%d.pth' % (epoch+1))
     return epoch_loss/step, overall_acc, per_class_acc, per_class_iou, mIOU
 
 #训练模型
 def train(args):
-    num_epochs = 30
+    num_epochs = 300
     step_size  = 50
     gamma      = 0.5
-    model = BaseDownSample(3,nclass).to(device)
+    bestIoU = 0.
+    print("Load model")
+    model = ALLSearch(3,nclass).to(device)
     batch_size = args.batch_size
     optimizer = optim.Adam(model.parameters(), weight_decay=1e-5)
     scheduler = lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)  # decay LR by a factor of 0.5 every 30 epochs
     #criterion = nn.CrossEntropyLoss(ignore_index=IGNORE_LABEL,reduction='mean')
     criterion = nn.CrossEntropyLoss()
+    print("Prepare Dataset")
     road_dataset= RoadDataset("../YeeDragon/data/training/",transform=x_main,target_transform=y_main)
     road_dataset_scale1 = RoadDataset("../YeeDragon/data/training/",transform=x_scale1,target_transform=y_scale1)
     road_dataset_scale2 = RoadDataset("../YeeDragon/data/training/",transform=x_scale2,target_transform=y_scale2)
@@ -185,6 +190,7 @@ def train(args):
     train_sampler = SubsetRandomSampler(train_indices)
     valid_sampler = SubsetRandomSampler(val_indices)
     #multi-scale dataloader
+    print("Load data")
     train_loader = DataLoader(road_dataset, batch_size=batch_size, sampler=train_sampler)
     train_loaderscale1 = DataLoader(road_dataset_scale1, batch_size=batch_size, sampler=train_sampler)
     train_loaderscale2 = DataLoader(road_dataset_scale2, batch_size=batch_size, sampler=train_sampler)
@@ -206,8 +212,13 @@ def train(args):
         epoch_loss, overall_acc, per_class_acc, per_class_iou, mIOU = train_model(model, criterion, optimizer, train_loader,scheduler, epoch, num_epochs)
         print("scale : 256x512")
         valepoch_loss,valoverall_acc, valper_class_acc, valper_class_iou, valmIOU = validation(epoch, model, criterion, optimizer, validation_loader)
-        
-        fp = open("road_BaseDownSample60ep_256_512_epoch_%d.txt" % num_epochs, "a")
+        if valmIOU >= bestIoU:
+            bestIoU = valmIOU
+            print("Best Iou:", bestIoU)
+            dirName = "./models/ALLSearch/"
+            torch.save(model.state_dict(), dirName+'ALLSearch_best.pth')
+            
+        fp = open("ALLSearch_epoch_%d.txt" % num_epochs, "a")
         fp.write("epoch %d train_loss:%0.3f \n" % (epoch+1, epoch_loss))
         fp.write("train overall_acc:%0.3f \n"%(overall_acc))
         fp.write("train per_class_acc: ")
@@ -228,73 +239,7 @@ def train(args):
         fp.write("val mIOU:%0.3f\n"% (valmIOU))
         fp.write("\n")
         fp.close()
-def Val(args):
-    model = ESPNet(12, p=2, q=3).to(device)
-    model.load_state_dict(torch.load(args.ckpt,map_location='cpu'))
-    batch_size = args.batch_size
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), weight_decay=1e-5)
-    road_dataset= RoadDataset("./data/training/",transform=x_transforms,target_transform=y_transforms)
-    validation_split = .2
-    shuffle_dataset = True
-    dataset_size = len(road_dataset)
-    indices = list(range(dataset_size))
-    split = int(np.floor(validation_split * dataset_size))
-    if shuffle_dataset :
-        np.random.seed(42)
-        np.random.shuffle(indices)
-    train_indices, val_indices = indices[split:], indices[:split]
-    valid_sampler = SubsetRandomSampler(val_indices)
-    validation_loader = DataLoader(road_dataset, batch_size=batch_size,
-                                                sampler=valid_sampler)
-    overall_acc, per_class_acc, per_class_iu, mIOU = validation(1, model, criterion, optimizer, validation_loader)
-    print("overall_acc:%0.3f per_class_acc:%0.3f per_class_iu:%0.3f, mIOU:%0.3f"%(overall_acc, per_class_acc, per_class_iu, mIOU))
-def Generate(args):
-    model = ESPNet(12, p=2, q=3).to(device)
-    model.load_state_dict(torch.load(args.ckpt,map_location='cpu'))
-    model.eval()
-    count=0
-    root = './data/testing/'
-    print("Generate...")
-    import time
-    tStart = time.time()
-    for filename in os.listdir(root):
-        if filename == '.ipynb_checkpoints':
-            continue
-        imgroot=os.path.join(root+filename)
-        name = filename[:-4]
-        print("Image Processing: ",name)
-        img = Image.open(imgroot)
-        img = x_transforms(img)
-        img = img.view(1,3,256,512) #forreference
-        #img = img.view(1,3,1080,1920) #forreference
-        img = img.to(device)
-        with torch.no_grad():
-            output = model(img)
-            output = torch.softmax(output,dim=1)
-            N, _, h, w = output.shape
-            pred = output.transpose(0, 2).transpose(3, 1).reshape(-1, 12).argmax(axis=1).reshape(N, h, w) #class 12
-            pred = pred.squeeze(0)
-            print(np.unique(pred.cpu()))
-            Decode_image(pred,name)
-    tEnd = time.time()#計時結束
-    #列印結果
-    print ("It cost %f sec" % (tEnd - tStart))#會自動做近位
 
-def Decode_image(img_n,name):
-    pallete = [[0,0,0] , 
-            [255, 0, 255], [128, 0, 128], [0, 64, 64], [0, 0, 0], [0, 0, 0], 
-            [255, 0, 0], [0, 255, 0], [255, 0, 0], [0, 0, 255], [255, 255, 0], 
-            [255, 0, 255]]
-    img_n = img_n.cpu()
-    img_ans=np.zeros((img_n.shape[0],img_n.shape[1],3), dtype=np.int) #class 12
-    for idx in range(len(pallete)):
-        [b, g, r] = pallete[idx]
-        img_ans[img_n == idx] = [b, g, r] 
-    im_ans = Image.fromarray(np.uint8(img_ans)).convert('RGB') 
-    im_ans = cv2.cvtColor(np.array(im_ans),cv2.COLOR_RGB2BGR)         
-    #return im_ans           
-    cv2.imwrite("./Result/"+name+"_espnet_pred_30_nojitter.png",im_ans)
 if __name__ == '__main__':
     #参数解析
     parse=argparse.ArgumentParser()
@@ -308,16 +253,6 @@ if __name__ == '__main__':
         train(args)
     elif args.action=="test":
         test(args)
-    elif args.action=="model":
-        Model_visualization(args)
-    elif args.action=="generate":
-        Generate(args)
-    elif args.action=="oonx":
-        oonx(args)
-    elif args.action=="check":
-        check_label(args)
-    elif args.action=="iou":
-        Val(args)
         
 
 

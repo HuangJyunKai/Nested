@@ -511,7 +511,8 @@ class DownSample_Decode_V1(nn.Module):
         for i in range(len(self.dsweight)):
             for j in range(len(self.dsweight[i])):
                 tmp = torch.sigmoid(self.dsweight[i][j])
-                if tmp >= 0.5:
+                #if tmp >= 0.5:
+                if j == 0:
                     self.dsweight[i][j] = 1
                 else :
                     self.dsweight[i][j] = 0

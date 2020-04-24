@@ -36,6 +36,7 @@ class Block(nn.Module):
         super(Block, self).__init__()
         self.double_conv = nn.Sequential(
             nn.ReLU(inplace=True),
+            #conv1x1
             nn.Conv2d(in_channels, middle_channels, 3, padding=1),
             nn.BatchNorm2d(middle_channels),
             nn.Conv2d(middle_channels, out_channels, 3, padding=1),
@@ -306,7 +307,7 @@ class NestedWNet_v2(nn.Module): #downsample + maxpooling
         output = self.final(x0_4)
         return output
 
-class NestedWNet_v3(nn.Module): #downsample + maxpooling
+class NestedWNet_v3(nn.Module): #downsample + maxpooling + 1x1
     def __init__(self, input_channels,n_classes):
         super().__init__()
         self.input_channels = input_channels

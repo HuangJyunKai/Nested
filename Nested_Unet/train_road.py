@@ -147,17 +147,17 @@ def train_model(model, criterion, optimizer, train_loader, scheduler, epoch, num
     print("per_class_acc :",per_class_acc)
     print("per_class_iou :",per_class_iou)
     print("mIOU :",mIOU)
-    dirName = "./models/road_DownSample_Decode_pretrainedV1_256_512/"
+    dirName = "./models/road_DownSample_Decode_pretrainedv2/"
     if not os.path.exists(dirName):
        os.mkdir(dirName)
        print("Directory " , dirName ,  " Created ")  
     if epoch%5==4:
-        torch.save(model.state_dict(), dirName+'road_DownSample_Decode_pretrainedV1_256_512_weights_epoch_%d.pth' % (epoch+1))
+        torch.save(model.state_dict(), dirName+'road_DownSample_Decode_pretrainedv2_weights_epoch_%d.pth' % (epoch+1))
     return epoch_loss/step, overall_acc, per_class_acc, per_class_iou, mIOU
 
 #训练模型
 def train(args):
-    num_epochs = 30
+    num_epochs = 250
     step_size  = 50
     gamma      = 0.5
     model_s = SearchDownSample(3,3).to(device)
@@ -218,7 +218,7 @@ def train(args):
         print("scale : 256x512")
         valepoch_loss,valoverall_acc, valper_class_acc, valper_class_iou, valmIOU = validation(epoch, model, criterion, optimizer, validation_loader)
         
-        fp = open("road_DownSample_Decode_pretrainedV1_256_512_epoch_%d.txt" % num_epochs, "a")
+        fp = open("road_DownSample_Decode_pretrainedv2_epoch_%d.txt" % num_epochs, "a")
         fp.write("epoch %d train_loss:%0.3f \n" % (epoch+1, epoch_loss))
         fp.write("train overall_acc:%0.3f \n"%(overall_acc))
         fp.write("train per_class_acc: ")
