@@ -378,8 +378,154 @@ class ALLSearch_Decode_V1(nn.Module):
                         
                         
             
-                        
         return self.final(layer4[0]) 
+    
+class ALLSearch_V2(nn.Module):
+    def __init__(self, input_channels,n_classes):
+        super().__init__()
+        self.input_channels = input_channels
+        self.n_classes = n_classes
+        self.multiplier = 2
+        self.layers = 5
+        self.module = nn.ModuleList()
+        nb_filter = [32, 64, 128, 256, 512]
+        self.inifilter = 32
+        self.pool = nn.MaxPool2d(2, 2)
+        self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        
+        self.final = nn.Conv2d(self.inifilter,n_classes , kernel_size=1)
+        #self.routes = [nn.Parameter(torch.randn(2*(self.layers-1-i)-1).cuda(), requires_grad=True) for i in range(self.layers-1)] #7 5 3 1
+        self._arch_param_names = ["routesdw0","routesdw1","routesdw2",
+                                  "routesup0","routesup1","routesup2",
+                                  "routessk01","routessk12","routessk23","routessk34",
+                                  "routessk02","routessk13","routessk24",
+                                  "routessk03","routessk14","routessk04"]
+        self._initialize_alphas ()
+
+        for layer in range(self.layers):
+            if layer == 0:
+                self.layermodule = nn.ModuleList()
+                for stage in range(self.layers-layer):
+                    if stage == 0: 
+                        self.layermodule.append(DoubleBlock(input_channels, nb_filter[0]))                           
+                    else :
+                        self.layermodule.append(DoubleBlock(self.inifilter * np.power(self.multiplier,stage-1) , self.inifilter * np.power(self.multiplier,stage)))
+                self.module.append(self.layermodule)
+            else :
+                self.layermodule = nn.ModuleList()
+                for stage in range(self.layers-layer):
+                    if stage == 0: #第一層 (32+64,32),(32*2+64,32)
+                        self.layermodule.append(DoubleBlock(self.inifilter * np.power(self.multiplier,stage) * layer +self.inifilter * np.power(self.multiplier,stage+1) , self.inifilter * np.power(self.multiplier,stage)))
+                    if stage > 0 : #(64*2+128,64),(64*3+128,64),(64*4+128,64)
+                        self.layermodule.append(DoubleBlock(self.inifilter * np.power(self.multiplier,stage) * (layer+1) +self.inifilter * np.power(self.multiplier,stage+1) , self.inifilter * np.power(self.multiplier,stage)))
+                
+                self.module.append(self.layermodule)
+                
+    def _initialize_alphas(self):
+        routesdw0 = nn.Parameter(1e-3*torch.ones(3).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[0], nn.Parameter(routesdw0))
+  
+        routesdw1 = nn.Parameter(1e-3*torch.ones(2).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[1], nn.Parameter(routesdw1))
+        
+        routesdw2 = nn.Parameter(1e-3*torch.ones(1).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[2], nn.Parameter(routesdw2))
+
+        routesup0 = nn.Parameter(1e-3*torch.ones(3).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[3], nn.Parameter(routesup0))
+  
+        routesup1 = nn.Parameter(1e-3*torch.ones(2).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[4], nn.Parameter(routesup1))
+        
+        routesup2 = nn.Parameter(1e-3*torch.ones(1).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[5], nn.Parameter(routesup2))
+        
+        routessk01 = nn.Parameter(1e-3*torch.ones(4).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[6], nn.Parameter(routessk01))
+        
+        routessk12 = nn.Parameter(1e-3*torch.ones(3).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[7], nn.Parameter(routessk12))
+        
+        routessk23 = nn.Parameter(1e-3*torch.ones(2).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[8], nn.Parameter(routessk23))
+        
+        routessk34 = nn.Parameter(1e-3*torch.ones(1).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[9], nn.Parameter(routessk34))
+        
+        routessk02 = nn.Parameter(1e-3*torch.ones(3).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[10], nn.Parameter(routessk02))
+        
+        routessk13 = nn.Parameter(1e-3*torch.ones(2).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[11], nn.Parameter(routessk13))
+        
+        routessk24 = nn.Parameter(1e-3*torch.ones(1).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[12], nn.Parameter(routessk24))
+        
+        routessk03 = nn.Parameter(1e-3*torch.ones(2).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[13], nn.Parameter(routessk03))
+        
+        routessk14 = nn.Parameter(1e-3*torch.ones(1).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[14], nn.Parameter(routessk14))
+        
+        routessk04 = nn.Parameter(1e-3*torch.ones(1).cuda(), requires_grad=True)
+        self.register_parameter(self._arch_param_names[15], nn.Parameter(routessk04))
+        
+        
+    def forward(self, input):  
+        layer0 = []
+        layer1 = []
+        layer2 = []
+        layer3 = []
+        layer4 = []
+        
+        for layer , mlayer in enumerate(self.module): 
+            
+            if layer == 0 :
+                for stage ,layers in enumerate(mlayer) :
+                    if stage == 0:
+                        layer0.append(self.module[layer][stage](input))        
+                    else :
+                        layer0.append(self.module[layer][stage](self.pool(layer0[stage-1])))
+                        
+            elif layer == 1:
+                for stage ,layers in enumerate(mlayer) :
+                    if stage == 0:
+                        layer1.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk01[stage]) * layer0[stage],torch.sigmoid(self.routesup0[stage]) * self.up(layer0[stage+1])], 1)))
+                    if stage > 0 and stage < (len(mlayer)+1)//2-1: 
+                        layer1.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk01[stage]) * layer0[stage],torch.sigmoid(self.routesup0[stage]) * self.up(layer0[stage+1]),torch.sigmoid(self.routesdw0[stage-1]) * self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer1[stage-1]))], 1)))
+                    if  stage == (len(mlayer)+1)//2-1: #最後一層不乘機率
+                        layer1.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk01[stage]) * layer0[stage],self.up(layer0[stage+1]),torch.sigmoid(self.routesdw0[stage-1]) * self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer1[stage-1]))], 1)))
+                        
+            elif layer == 2:
+                for stage ,layers in enumerate(mlayer) :
+                    if stage == 0:
+                        layer2.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk02[stage]) * layer0[stage],torch.sigmoid(self.routessk12[stage]) * layer1[stage],torch.sigmoid(self.routesup1[stage]) * self.up(layer1[stage+1])], 1)))
+                    if stage > 0  and stage < (len(mlayer)+1)//2-1: 
+                        layer2.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk02[stage]) * layer0[stage],torch.sigmoid(self.routessk12[stage]) * layer1[stage],torch.sigmoid(self.routesup1[stage]) * self.up(layer1[stage+1]),torch.sigmoid(self.routesdw1[stage-1]) * self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer2[stage-1]))], 1)))
+                    if  stage == (len(mlayer)+1)//2-1: #最後一層不乘機率
+                        layer2.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk02[stage]) * layer0[stage],torch.sigmoid(self.routessk12[stage]) * layer1[stage],self.up(layer1[stage+1]),torch.sigmoid(self.routesdw1[stage-1]) * self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer2[stage-1]))], 1)))
+                        
+            elif layer == 3:
+                for stage ,layers in enumerate(mlayer) :
+                    if stage == 0:
+                        layer3.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk03[stage]) * layer0[stage],torch.sigmoid(self.routessk13[stage]) * layer1[stage],torch.sigmoid(self.routessk23[stage]) * layer2[stage],torch.sigmoid(self.routesup2[stage]) * self.up(layer2[stage+1])], 1)))
+                    if stage > 0  and stage < (len(mlayer)+1)//2-1: 
+                        layer3.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk03[stage]) * layer0[stage],torch.sigmoid(self.routessk13[stage]) * layer1[stage],torch.sigmoid(self.routessk23[stage]) * layer2[stage],torch.sigmoid(self.routesup2[stage]) * self.up(layer2[stage+1]),torch.sigmoid(self.routesdw2[stage-1]) * self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer3[stage-1]))], 1)))
+                    if  stage == (len(mlayer)+1)//2-1: #最後一層不乘機率
+                        layer3.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk03[stage]) * layer0[stage],torch.sigmoid(self.routessk13[stage]) * layer1[stage],torch.sigmoid(self.routessk23[stage]) * layer2[stage],self.up(layer2[stage+1]),torch.sigmoid(self.routesdw2[stage-1])*self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer3[stage-1]))], 1)))
+                        
+            elif layer == 4:
+                for stage ,layers in enumerate(mlayer) :
+                    layer4.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk04[stage]) * layer0[stage],torch.sigmoid(self.routessk14[stage]) * layer1[stage],torch.sigmoid(self.routessk24[stage]) * layer2[stage],torch.sigmoid(self.routessk34[stage]) * layer3[stage],self.up(layer3[stage+1])], 1)))
+                        
+        return self.final(layer4[0])        
+        
+        
+    def arch_parameters(self):
+        return [param for name, param in self.named_parameters() if name in self._arch_param_names]
+
+    def weight_parameters(self):
+        return [param for name, param in self.named_parameters() if name not in self._arch_param_names]
     
     
 class ALLSearch_Decode_V2(nn.Module):
@@ -541,7 +687,7 @@ class ALLSearch_Decode_V2(nn.Module):
                         concatlst = []
                         if self.routessk01[stage] == 1:
                             concatlst.append(layer0[stage])
-                        elif self.routesup0[stage] == 1:
+                        if self.routesup0[stage] == 1:
                             concatlst.append(self.up(layer0[stage+1]))
                         layer1.append(self.module[layer][stage](torch.cat(concatlst, 1)))
                     if stage > 0 and stage < len(mlayer) - 1: 
