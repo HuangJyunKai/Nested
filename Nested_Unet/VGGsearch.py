@@ -407,7 +407,7 @@ class ALLSearch_V2(nn.Module):
                 self.layermodule = nn.ModuleList()
                 for stage in range(self.layers-layer):
                     if stage == 0: 
-                        self.layermodule.append(DoubleBlock(input_channels, nb_filter[0]))                           
+                        self.layermodule.append(DoubleBlock(input_channels, self.inifilter))                           
                     else :
                         self.layermodule.append(DoubleBlock(self.inifilter * np.power(self.multiplier,stage-1) , self.inifilter * np.power(self.multiplier,stage)))
                 self.module.append(self.layermodule)
@@ -415,9 +415,9 @@ class ALLSearch_V2(nn.Module):
                 self.layermodule = nn.ModuleList()
                 for stage in range(self.layers-layer):
                     if stage == 0: #第一層 (32+64,32),(32*2+64,32)
-                        self.layermodule.append(DoubleBlock(self.inifilter * np.power(self.multiplier,stage) * layer +self.inifilter * np.power(self.multiplier,stage+1) , self.inifilter * np.power(self.multiplier,stage)))
-                    if stage > 0 : #(64*2+128,64),(64*3+128,64),(64*4+128,64)
-                        self.layermodule.append(DoubleBlock(self.inifilter * np.power(self.multiplier,stage) * (layer+1) +self.inifilter * np.power(self.multiplier,stage+1) , self.inifilter * np.power(self.multiplier,stage)))
+                        self.layermodule.append(DoubleBlock(self.inifilter * np.power(self.multiplier,stage) * layer + self.inifilter * np.power(self.multiplier,stage+1) , self.inifilter * np.power(self.multiplier,stage)))
+                    if stage > 0 : #(64*1+32+128,64),(64*2+32+128,64),(64*3+128,64)
+                        self.layermodule.append(DoubleBlock(self.inifilter * np.power(self.multiplier,stage) * layer + self.inifilter * np.power(self.multiplier,stage-1) + self.inifilter * np.power(self.multiplier,stage+1) , self.inifilter * np.power(self.multiplier,stage)))
                 
                 self.module.append(self.layermodule)
                 
@@ -491,28 +491,28 @@ class ALLSearch_V2(nn.Module):
                 for stage ,layers in enumerate(mlayer) :
                     if stage == 0:
                         layer1.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk01[stage]) * layer0[stage],torch.sigmoid(self.routesup0[stage]) * self.up(layer0[stage+1])], 1)))
-                    if stage > 0 and stage < (len(mlayer)+1)//2-1: 
-                        layer1.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk01[stage]) * layer0[stage],torch.sigmoid(self.routesup0[stage]) * self.up(layer0[stage+1]),torch.sigmoid(self.routesdw0[stage-1]) * self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer1[stage-1]))], 1)))
-                    if  stage == (len(mlayer)+1)//2-1: #最後一層不乘機率
-                        layer1.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk01[stage]) * layer0[stage],self.up(layer0[stage+1]),torch.sigmoid(self.routesdw0[stage-1]) * self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer1[stage-1]))], 1)))
+                    if stage > 0 and stage < len(mlayer) - 1: 
+                        layer1.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk01[stage]) * layer0[stage],torch.sigmoid(self.routesup0[stage]) * self.up(layer0[stage+1]),torch.sigmoid(self.routesdw0[stage-1]) * self.pool(layer1[stage-1])], 1)))
+                    if  stage == len(mlayer) - 1: #最後一層不乘機率
+                        layer1.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk01[stage]) * layer0[stage],self.up(layer0[stage+1]),torch.sigmoid(self.routesdw0[stage-1]) * self.pool(layer1[stage-1])], 1)))
                         
             elif layer == 2:
                 for stage ,layers in enumerate(mlayer) :
                     if stage == 0:
                         layer2.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk02[stage]) * layer0[stage],torch.sigmoid(self.routessk12[stage]) * layer1[stage],torch.sigmoid(self.routesup1[stage]) * self.up(layer1[stage+1])], 1)))
-                    if stage > 0  and stage < (len(mlayer)+1)//2-1: 
-                        layer2.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk02[stage]) * layer0[stage],torch.sigmoid(self.routessk12[stage]) * layer1[stage],torch.sigmoid(self.routesup1[stage]) * self.up(layer1[stage+1]),torch.sigmoid(self.routesdw1[stage-1]) * self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer2[stage-1]))], 1)))
-                    if  stage == (len(mlayer)+1)//2-1: #最後一層不乘機率
-                        layer2.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk02[stage]) * layer0[stage],torch.sigmoid(self.routessk12[stage]) * layer1[stage],self.up(layer1[stage+1]),torch.sigmoid(self.routesdw1[stage-1]) * self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer2[stage-1]))], 1)))
+                    if stage > 0  and stage < len(mlayer) - 1: 
+                        layer2.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk02[stage]) * layer0[stage],torch.sigmoid(self.routessk12[stage]) * layer1[stage],torch.sigmoid(self.routesup1[stage]) * self.up(layer1[stage+1]),torch.sigmoid(self.routesdw1[stage-1]) * self.pool(layer2[stage-1])], 1)))
+                    if  stage == len(mlayer) - 1: #最後一層不乘機率
+                        layer2.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk02[stage]) * layer0[stage],torch.sigmoid(self.routessk12[stage]) * layer1[stage],self.up(layer1[stage+1]),torch.sigmoid(self.routesdw1[stage-1]) * self.pool(layer2[stage-1])], 1)))
                         
             elif layer == 3:
                 for stage ,layers in enumerate(mlayer) :
                     if stage == 0:
                         layer3.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk03[stage]) * layer0[stage],torch.sigmoid(self.routessk13[stage]) * layer1[stage],torch.sigmoid(self.routessk23[stage]) * layer2[stage],torch.sigmoid(self.routesup2[stage]) * self.up(layer2[stage+1])], 1)))
-                    if stage > 0  and stage < (len(mlayer)+1)//2-1: 
-                        layer3.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk03[stage]) * layer0[stage],torch.sigmoid(self.routessk13[stage]) * layer1[stage],torch.sigmoid(self.routessk23[stage]) * layer2[stage],torch.sigmoid(self.routesup2[stage]) * self.up(layer2[stage+1]),torch.sigmoid(self.routesdw2[stage-1]) * self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer3[stage-1]))], 1)))
-                    if  stage == (len(mlayer)+1)//2-1: #最後一層不乘機率
-                        layer3.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk03[stage]) * layer0[stage],torch.sigmoid(self.routessk13[stage]) * layer1[stage],torch.sigmoid(self.routessk23[stage]) * layer2[stage],self.up(layer2[stage+1]),torch.sigmoid(self.routesdw2[stage-1])*self.module[layer][stage+(len(mlayer)+1)//2-1](self.pool(layer3[stage-1]))], 1)))
+                    if stage > 0  and stage < len(mlayer) - 1: 
+                        layer3.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk03[stage]) * layer0[stage],torch.sigmoid(self.routessk13[stage]) * layer1[stage],torch.sigmoid(self.routessk23[stage]) * layer2[stage],torch.sigmoid(self.routesup2[stage]) * self.up(layer2[stage+1]),torch.sigmoid(self.routesdw2[stage-1]) * self.pool(layer3[stage-1])], 1)))
+                    if  stage == len(mlayer) - 1: #最後一層不乘機率
+                        layer3.append(self.module[layer][stage](torch.cat([torch.sigmoid(self.routessk03[stage]) * layer0[stage],torch.sigmoid(self.routessk13[stage]) * layer1[stage],torch.sigmoid(self.routessk23[stage]) * layer2[stage],self.up(layer2[stage+1]),torch.sigmoid(self.routesdw2[stage-1]) * self.pool(layer3[stage-1])], 1)))
                         
             elif layer == 4:
                 for stage ,layers in enumerate(mlayer) :
@@ -791,6 +791,9 @@ if __name__ == '__main__':
     
     x = torch.rand(size=(1,3,256,256))
     y = torch.rand(size=(1,3,256,256))
+    model = ALLSearch_V2(3,3).to(device)
+    
+    '''
     model_s = ALLSearch(3,3).to(device)
     
     model_s.load_state_dict(torch.load("./models/ALLSearch/ALLSearch_best.pth"
@@ -806,7 +809,7 @@ if __name__ == '__main__':
     #print(summary(model,(3,256,256)))
     flops, params = profile(model, inputs=(x.to(device), ))
     print(flops,params)
-    
+    ''' 
     #print (model.arch_parameters ())
     optimizer = optim.Adam(model.parameters(), weight_decay=1e-5)
     criterion = nn.BCEWithLogitsLoss()
@@ -824,12 +827,12 @@ if __name__ == '__main__':
         epoch_loss += loss.item()
         #print(loss)
         print("epoch:",i)
-        #print (model.arch_parameters ())
+        print (model.arch_parameters ())
         #print(parm0,parm1,parm2,parm3)
     #for param in model.parameters():
         #print(type(param.data), param.size())
         
-        
+       
         
         
     
